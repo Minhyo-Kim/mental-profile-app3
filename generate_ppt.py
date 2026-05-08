@@ -395,28 +395,47 @@ def replace_para(c, anchor, new_text):
 
 def update_slide3(path, data, commentary=None):
     with open(path,'r',encoding='utf-8') as f: c=f.read()
-    c=c.replace('>김도담<',f'>{data["name"]}<')
-    if commentary:
-        # 총평을 3개 단락으로 분리해서 슬라이드3 단락에 삽입
-        paras = [p.strip() for p in commentary.strip().split('\n') if p.strip()]
-        # 단락1: 이름 뒤 텍스트 (기존 슬라이드3 첫 단락 suffix)
-        old_sfx = (" 선수의 스포츠심리측정 결과, 전반적으로 시합 상황에서 긴장과 부담을 크게 느끼는 편으로 나타났습니다. "
-                   "스포츠경쟁불안(특성불안)이 높은 편이라 중요한 경기일수록 압박감이 커지거나 경기 전부터 부담을 많이 느낄 수 있습니다. "
-                   "상태불안 결과에서는 인지적 불안과 신체적 불안 모두 높게 나타나, 경기 전후로 생각이 많아지고 걱정이 커지는 동시에 "
-                   "몸의 긴장도 함께 올라오는 형태로 불안이 강하게 나타날 수 있습니다. 특히 상태 자신감이 낮게 나타나, 긴장 상황에서 "
-                   "&quot;할 수 있다&quot;는 마음을 유지하는 것이 쉽지 않을 수 있습니다. ")
-        name = data['name']
-        # 단락1,2를 합쳐서 첫 번째 슬라이드 단락에 넣기
-        p12 = paras[0] if len(paras) >= 1 else ""
-        if len(paras) >= 2: p12 += " " + paras[1]
-        new_sfx = xesc(p12[len(name + ' 선수의 '):]) if p12.startswith(name) else xesc(p12)
-        c = c.replace(old_sfx, f' 선수의 {new_sfx}')
-        # 단락3: 자신감
-        p3 = paras[2] if len(paras) >= 3 else ""
-        c = replace_para(c, "스포츠 자신감(자신감의 원천)에서는 ", p3)
-        # 단락4: 수행전략
-        p4 = paras[3] if len(paras) >= 4 else ""
-        c = replace_para(c, "수행전략에서는 심상과 목표설정이 비교적 잘 활용되고 있으나", p4)
+
+    if not commentary:
+        # 이름만 교체
+        c = c.replace('>김도담<', f'>{data["name"]}<')
+        with open(path,'w',encoding='utf-8') as f: f.write(c)
+        return
+
+    # 총평 단락 분리
+    paras = [p.strip() for p in commentary.strip().split('\n') if p.strip()]
+
+    # 총평 텍스트박스 찾기 (김도담이 포함된 txBody)
+    idx = c.find('>김도담<')
+    if idx == -1:
+        # 이미 이름이 바뀐 경우
+        idx = c.find(f'>{data["name"]}<')
+    txbody_start = c.rfind('<p:txBody>', 0, idx)
+    txbody_end = c.find('</p:txBody>', idx) + len('</p:txBody>')
+    txbody_old = c[txbody_start:txbody_end]
+
+    # 기존 단락에서 pPr, rPr 추출 (폰트 보존)
+    ppr_m = re.search(r'<a:pPr.*?</a:pPr>', txbody_old, re.DOTALL)
+    rpr_m = re.search(r'<a:rPr lang="ko-KR".*?</a:rPr>', txbody_old, re.DOTALL)
+    ppr = ppr_m.group(0) if ppr_m else FIXED_PPR
+    rpr = rpr_m.group(0) if rpr_m else FIXED_RPR
+
+    def make_para_with_style(text):
+        escaped = xesc(text)
+        return f'<a:p>{ppr}<a:r>{rpr}<a:t xml:space="preserve">{escaped}</a:t></a:r></a:p>'
+
+    # 새 단락들 생성 (총평 4단락)
+    new_paras = ''.join(make_para_with_style(p) for p in paras)
+
+    # txBody 내부의 모든 <a:p> 블록을 새 단락으로 교체
+    # txBody 헤더(bodyPr 등) 보존
+    txbody_header_end = txbody_old.find('<a:p>')
+    txbody_footer_start = txbody_old.rfind('</a:p>') + len('</a:p>')
+    txbody_new = (txbody_old[:txbody_header_end] +
+                  new_paras +
+                  txbody_old[txbody_footer_start:])
+
+    c = c[:txbody_start] + txbody_new + c[txbody_end:]
     with open(path,'w',encoding='utf-8') as f: f.write(c)
 
 # ── 메인 생성 함수 ────────────────────────────────────────────────────────────
